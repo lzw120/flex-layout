@@ -9,18 +9,15 @@ import {
   Directive,
   ElementRef,
   Input,
+  DoCheck,
   OnDestroy,
-  OnInit,
   Renderer,
-  OnChanges,
-  SimpleChanges,
   IterableDiffers,
-  KeyValueDiffers
+  KeyValueDiffers, SimpleChanges, OnChanges
 } from '@angular/core';
 import {NgClass} from '@angular/common';
 
 import {BaseFxDirectiveAdapter} from './base-adapter';
-import {BreakPointRegistry} from './../../media-query/breakpoints/break-point-registry';
 import {MediaChange} from '../../media-query/media-change';
 import {MediaMonitor} from '../../media-query/media-monitor';
 
@@ -42,7 +39,7 @@ export type NgClassType = string | string[] | Set<string> | {[klass: string]: an
     [ngClass.gt-xs], [ngClass.gt-sm], [ngClass.gt-md], [ngClass.gt-lg]  
   `
 })
-export class ClassDirective extends NgClass implements OnInit, OnChanges, OnDestroy {
+export class ClassDirective extends NgClass implements DoCheck, OnChanges, OnDestroy {
 
   /**
    * Intercept ngClass assignments so we cache the default classes
@@ -72,7 +69,7 @@ export class ClassDirective extends NgClass implements OnInit, OnChanges, OnDest
   @Input('ngClass.gt-lg') set ngClassGtLg(val: NgClassType) { this._base.cacheInput('classGtLg', val, true); };
 
   /** Deprecated selectors */
-  @Input('class')         set classBase(val: NgClassType) { this._base.cacheInput('class', val, true); }
+  @Input('class')         set klazz(val: NgClassType) { this._base.cacheInput('class', val, true); }
   @Input('class.xs')      set classXs(val: NgClassType) { this._base.cacheInput('classXs', val, true); }
   @Input('class.sm')      set classSm(val: NgClassType) {  this._base.cacheInput('classSm', val, true); };
   @Input('class.md')      set classMd(val: NgClassType) { this._base.cacheInput('classMd', val, true);};
@@ -91,40 +88,58 @@ export class ClassDirective extends NgClass implements OnInit, OnChanges, OnDest
 
   /* tslint:enable */
   constructor(protected monitor: MediaMonitor,
-              protected _bpRegistry: BreakPointRegistry,
               _iterableDiffers: IterableDiffers, _keyValueDiffers: KeyValueDiffers,
               _ngEl: ElementRef, _renderer: Renderer) {
     super(_iterableDiffers, _keyValueDiffers, _ngEl, _renderer);
-    this._base = new BaseFxDirectiveAdapter(monitor, _ngEl, _renderer);
+    this._base = new BaseFxDirectiveAdapter("class", monitor, _ngEl, _renderer);
   }
 
+  // ******************************************************************
+  // Lifecycle Hookks
+  // ******************************************************************
+
   /**
-   * For @Input changes on the current mq activation property, see onMediaQueryChanges()
+   * For @Input changes on the current mq activation property
    */
   ngOnChanges(changes: SimpleChanges) {
-    const changed = this._bpRegistry.items.some(it => {
-      return (`ngClass${it.suffix}` in changes) || (`class${it.suffix}` in changes);
-    });
-    if (changed || this._base.mqActivation) {
-      this._updateClass();
-    }
+    const changed = (this._base.activeKey in changes);
+    return changed && this._updateClass();
   }
 
   /**
-   * After the initial onChanges, build an mqActivation object that bridges
-   * mql change events to onMediaQueryChange handlers
+   * For ChangeDetectionStrategy.onPush and ngOnChanges() updates
    */
-  ngOnInit() {
-    this._base.listenForMediaQueryChanges('class', '', (changes: MediaChange) => {
-      this._updateClass(changes.value);
-    });
-    this._updateClass();
+  ngDoCheck() {
+    if (!this._base.hasMQListener) {
+      this._configureMQListener();
+    }
+    super.ngDoCheck();
   }
 
   ngOnDestroy() {
     this._base.ngOnDestroy();
   }
 
+  // ******************************************************************
+  // Internal Methods
+  // ******************************************************************
+
+  /**
+   * Build an mqActivation object that bridges
+   * mql change events to onMediaQueryChange handlers
+   */
+  protected _configureMQListener() {
+    this._base.listenForMediaQueryChanges('class', '', (changes: MediaChange) => {
+      this._updateClass(changes.value);
+
+      // trigger NgClass::_applyIterableChanges()
+      super.ngDoCheck();
+    });
+  }
+
+  /**
+   *
+   */
   protected _updateClass(value?: NgClassType) {
     let clazz = value || this._base.queryInput("class") || '';
     if (this._base.mqActivation) {
